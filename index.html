@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Flow Tracker</title>
+    
+    <link rel="manifest" href="manifest.json">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen p-4">
+
+    <div id="app" class="max-w-4xl mx-auto space-y-6">
+        <header class="text-center py-4 bg-white shadow-lg rounded-xl">
+            <h1 class="text-2xl font-bold text-indigo-700">AI Budget & Flow Tracker</h1>
+            <p class="text-sm text-gray-500">Minimal version for file parsing, filtering, and charting tests.</p>
+        </header>
+
+        <div id="status-message" class="hidden p-3 text-sm font-medium rounded-lg text-center"></div>
+        <div id="loading-spinner" class="hidden text-center p-4 bg-white rounded-xl shadow">
+            <svg class="animate-spin h-6 w-6 text-indigo-500 mx-auto" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="4" stroke="currentColor">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <p class="mt-2 text-indigo-600 font-medium text-sm">Processing data...</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            
+            <div class="bg-white shadow-lg rounded-xl p-4 text-center border-l-4 border-indigo-500">
+                <p class="text-xs font-medium text-gray-600 uppercase">Total Current Balance</p>
+                <p id="total-account-balance" class="text-2xl font-extrabold text-indigo-700 mt-1">$0.00</p>
+                <p class="text-xs text-gray-400 mt-1">(Latest balance from data)</p>
+            </div>
+            
+            <div class="bg-white shadow-lg rounded-xl p-4 text-center border-l-4 border-green-500">
+                <p class="text-xs font-medium text-gray-600 uppercase">Balance Change (Filtered Range)</p>
+                <p id="balance-change-metric" class="text-2xl font-extrabold text-green-700 mt-1">$0.00</p>
+                <p class="text-xs text-gray-400 mt-1">(Difference: End Date Balance - Start Date Balance)</p>
+            </div>
+            
+            <div class="bg-white shadow-lg rounded-xl p-4 text-center border-l-4 border-blue-500">
+                <p class="text-xs font-medium text-gray-600 uppercase">Transactions Count</p>
+                <p id="total-count" class="text-2xl font-extrabold text-blue-700 mt-1">0</p>
+                <p class="text-xs text-gray-400 mt-1">(Filtered count)</p>
+            </div>
+        </div>
+        
+        <div class="bg-white shadow-lg rounded-xl p-4">
+            <h2 class="text-lg font-semibold text-gray-700 mb-4 border-b pb-2">Monthly Total Balance Trend</h2>
+            <div class="relative h-64 w-full">
+                <canvas id="monthly-balance-chart"></canvas>
+            </div>
+            <p id="chart-empty-state" class="text-center p-4 text-gray-500 hidden">Upload transaction data to view balance trend.</p>
+        </div>
+
+        <div class="bg-white shadow-lg rounded-xl p-4">
+            <h2 class="text-lg font-semibold text-gray-700 mb-2 border-b pb-2">Current Account Balances</h2>
+            <div id="account-balances-list" class="space-y-1">
+                <p class="text-xs text-gray-500">No transactions loaded yet. Upload a file to see account balances.</p>
+            </div>
+        </div>
+        
+        <div class="bg-white shadow-lg rounded-xl p-4 space-y-4">
+            <h2 class="text-xl font-semibold text-gray-700 border-b pb-2">Data Management</h2>
+            
+            <form id="csv-upload-form" class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2">
+                <input type="file" id="csvFile" accept=".csv, .txt" required class="block w-full text-sm text-gray-900 border border-gray-300 rounded-lg p-2.5">
+                <button type="submit" class="flex-shrink-0 px-4 py-2 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition">
+                    Upload & Merge
+                </button>
+            </form>
+
+            <div class="flex flex-col sm:flex-row space-y-2 sm:space-y-0 sm:space-x-2 items-end">
+                <label for="startDate" class="w-full sm:w-1/3 text-gray-600 text-sm">Start Date:
+                    <input type="date" id="startDate" class="mt-1 block w-full p-2 border border-gray-300 rounded-lg">
+                </label>
+                <label for="endDate" class="w-full sm:w-1/3 text-gray-600 text-sm">End Date:
+                    <input type="date" id="endDate" class="mt-1 block w-full p-2 border border-gray-300 rounded-lg">
+                </label>
+                <button onclick="applyDateFilter()" class="w-full sm:w-1/3 px-4 py-2 bg-indigo-500 text-white font-semibold rounded-lg hover:bg-indigo-600 transition">
+                    Apply Filter
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-white shadow-lg rounded-xl p-4 space-y-4">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b pb-2">
+                <h2 class="text-xl font-semibold text-gray-700 mb-2 sm:mb-0">Transaction History (Filtered)</h2>
+                <div class="flex space-x-2">
+                    <button id="run-ai-analysis-btn" class="px-3 py-1 text-sm bg-green-500 text-white font-semibold rounded-lg hover:bg-green-600 transition">
+                        Run AI Analysis
+                    </button>
+                    <button id="delete-all-btn" class="px-3 py-1 text-sm bg-red-500 text-white font-semibold rounded-lg hover:bg-red-600 transition">
+                        Delete ALL
+                    </button>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto max-h-80">
+                <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50 sticky top-0">
+                        <tr>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Balance</th>
+                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Act</th>
+                        </tr>
+                    </thead>
+                    <tbody id="transaction-list" class="bg-white divide-y divide-gray-200">
+                        </tbody>
+                </table>
+                <p id="empty-state" class="text-center p-4 text-gray-500 hidden">No transactions recorded yet.</p>
+            </div>
+        </div>
+
+        <div class="bg-indigo-50 shadow-lg rounded-xl p-4" id="analysis-results">
+            <h2 class="text-xl font-semibold text-indigo-700 mb-3 border-b border-indigo-200 pb-2">Financial Analysis</h2>
+            <div id="ai-response-content" class="text-gray-700 prose max-w-none text-sm">
+                <p>Click "Run AI Analysis" above after uploading transactions to get simple, actionable financial advice. **(Requires API key in the code)**</p>
+            </div>
+            <div id="sources-display" class="mt-3 pt-3 border-t border-indigo-200 hidden">
+                <h4 class="text-xs font-semibold text-indigo-600 mb-1">Sources:</h4>
+                <ul id="source-list" class="text-xs text-gray-600 space-y-0.5"></ul>
+            </div>
+        </div>
+
+        <div id="custom-modal" class="fixed inset-0 bg-gray-600 bg-opacity-50 hidden items-center justify-center p-4 z-50">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-sm p-4 transform scale-95 opacity-0 transition-all duration-300" id="modal-content">
+                <h3 id="modal-title" class="text-lg font-bold mb-2 text-gray-800"></h3>
+                <p id="modal-message" class="text-sm text-gray-600 mb-4"></p>
+                <div class="flex justify-end space-x-2">
+                    <button id="modal-cancel" class="px-3 py-1 text-sm bg-gray-300 text-gray-800 font-semibold rounded-lg hover:bg-gray-400 transition">Cancel</button>
+                    <button id="modal-confirm" class="px-3 py-1 text-sm bg-red-600 text-white font-semibold rounded-lg hover:bg-red-700 transition">Confirm</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        // --- Service Worker Registration for PWA ---
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then(registration => {
+                        console.log('ServiceWorker registered:', registration.scope);
+                    })
+                    .catch(error => {
+                        console.log('ServiceWorker registration failed:', error);
+                    });
+            });
+        }
+        // --- END PWA Registration ---
+
+        const TRANSACTION_KEY = 'ai_budget_transactions_simple';
+
+        let currentTransactions = []; 
+        let filterStartDate = null;
+        let filterEndDate = null;
+        let monthlyBalanceChart = null; // Global variable to store the Chart.js instance
+
+        // --- Utility Functions ---
+        const formatCurrency = (amount) => {
+            if (amount === undefined || amount === null) return '--';
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+        };
+        
+        const parseDate = (dateStr) => {
+            let date = new Date(dateStr);
+            if (isNaN(date.getTime())) {
+                const parts = dateStr.split(/[-/.]/).map(p => parseInt(p, 10));
+                if (parts.length === 3) { 
+                    // Attempt MM/DD/YYYY or DD/MM/YYYY. Assuming YYYY is the last part if > 1900.
+                    const year = parts[2] > 1900 ? parts[2] : parts[0];
+                    const month = parts[2] > 1900 ? parts[0] : parts[1];
+                    const day = parts[2] > 1900 ? parts[1] : parts[2];
+
+                    if (year && month && day) {
+                         date = new Date(year, month - 1, day);
+                    }
+                }
+            }
+            date.setHours(0, 0, 0, 0);
+            return date;
+        };
+
+        /**
+         * Generates an array of YYYY-MM strings for every month between start and end date (inclusive).
+         */
+        function getMonthsBetween(start, end) {
+            // Clone start date to avoid mutation, and set to the 1st of the month
+            let current = new Date(start.getFullYear(), start.getMonth(), 1);
+            const endDate = new Date(end.getFullYear(), end.getMonth(), 1);
+
+            const months = [];
+            while (current.getTime() <= endDate.getTime()) {
+                months.push(`${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`);
+                // Move to the next month
+                current.setMonth(current.getMonth() + 1);
+            }
+            return months;
+        }
+
+        function getLatestTotalBalanceAtDate(targetDate) {
+            const balances = {};
+            const targetTimestamp = parseDate(targetDate).getTime();
+            
+            // 1. Find all transactions up to target date
+            const relevantTxs = currentTransactions.filter(tx => parseDate(tx.date).getTime() <= targetTimestamp);
+            
+            // 2. Sort the relevant transactions by date (latest first) to find the latest balance for each account
+            relevantTxs.sort((a, b) => parseDate(b.date).getTime() - parseDate(a.date).getTime());
+
+            // 3. Iterate and record the latest balance for each account found
+            relevantTxs.forEach(tx => {
+                if (tx.account && balances[tx.account] === undefined && typeof tx.balance === 'number') {
+                    balances[tx.account] = tx.balance;
+                }
+            });
+
+            // 4. Sum up the latest balances for all accounts
+            return Object.values(balances).reduce((sum, bal) => sum + bal, 0);
+        }
+        
+        function showStatus(message, type = 'info') {
+            const statusEl = document.getElementById('status-message');
+            statusEl.textContent = message;
+            statusEl.className = 'p-3 mb-4 text-sm font-medium rounded-lg text-center transition duration-300'; 
+            statusEl.classList.remove('hidden');
+
+            const classMap = {
+                success: ['bg-green-100', 'text-green-800'],
+                error: ['bg-red-100', 'text-red-800'],
+                info: ['bg-blue-100', 'text-blue-800']
+            };
+            statusEl.classList.add(...(classMap[type] || classMap['info']));
+            setTimeout(() => statusEl.classList.add('hidden'), 5000);
+        }
+
+        function showLoading(show, message = 'Processing data...') {
+            const spinner = document.getElementById('loading-spinner');
+            spinner.querySelector('p').textContent = message;
+            spinner.classList.toggle('hidden', !show);
+            document.querySelector('#csv-upload-form button').disabled = show;
+        }
+
+        function showModal(title, message, isConfirm = false) {
+            return new Promise(resolve => {
+                const modal = document.getElementById('custom-modal');
+                document.getElementById('modal-title').textContent = title;
+                document.getElementById('modal-message').textContent = message;
+                const confirmBtn = document.getElementById('modal-confirm');
+                const cancelBtn = document.getElementById('modal-cancel');
+
+                cancelBtn.classList.toggle('hidden', !isConfirm);
+                confirmBtn.textContent = isConfirm ? 'Delete' : 'OK';
+                confirmBtn.className = confirmBtn.className.replace(/bg-(red|indigo)-\d+/g, isConfirm ? 'bg-red-600' : 'bg-indigo-600');
+                confirmBtn.className = confirmBtn.className.replace(/hover:bg-(red|indigo)-\d+/g, isConfirm ? 'hover:bg-red-700' : 'hover:bg-indigo-700');
+                
+                const handler = (result) => {
+                    modal.querySelector('#modal-content').classList.remove('opacity-100', 'scale-100');
+                    modal.querySelector('#modal-content').classList.add('opacity-0', 'scale-95');
+                    setTimeout(() => modal.classList.add('hidden'), 300);
+                    confirmBtn.removeEventListener('click', confirmHandler);
+                    cancelBtn.removeEventListener('click', cancelHandler);
+                    resolve(result);
+                };
+
+                const confirmHandler = () => handler(true);
+                const cancelHandler = () => handler(false);
+
+                confirmBtn.addEventListener('click', confirmHandler);
+                cancelBtn.addEventListener('click', cancelHandler);
+
+                modal.classList.remove('hidden');
+                setTimeout(() => {
+                    modal.querySelector('#modal-content').classList.remove('opacity-0', 'scale-95');
+                    modal.querySelector('#modal-content').classList.add('opacity-100', 'scale-100');
+                }, 10);
+            });
+        }
+        
+        // --- Filtering and Data Functions ---
+        function getFilteredTransactions() {
+            if (!currentTransactions || currentTransactions.length === 0) return [];
+            
+            const start = filterStartDate ? parseDate(filterStartDate) : null;
+            const end = filterEndDate ? parseDate(filterEndDate) : null;
+            if (end) end.setHours(23, 59, 59, 999);
+
+            return currentTransactions.filter(tx => {
+                const txDate = parseDate(tx.date); 
+                const isAfterStart = !start || txDate >= start;
+                const isBeforeEnd = !end || txDate <= end;
+                return isAfterStart && isBeforeEnd;
+            });
+        }
+
+        window.applyDateFilter = function() {
+            filterStartDate = document.getElementById('startDate').value;
+            filterEndDate = document.getElementById('endDate').value;
+            updateUI();
+            showStatus('Filter applied. Displaying filtered transactions.', 'info');
+        }
+
+        function updateUI() {
+            const filteredTransactions = getFilteredTransactions();
+            
+            // 1. Calculate and update balances 
+            const balances = getLatestAccountBalances();
+            calculateAndDisplayTotalBalance(balances);
+            calculateAndDisplayBalanceChange(); 
+            document.getElementById('total-count').textContent = filteredTransactions.length.toLocaleString();
+
+            // 2. Render breakdown and visuals
+            renderAccountBalances(balances);
+            renderTransactions(filteredTransactions);
+            
+            // 3. Render Chart
+            renderMonthlyBalanceChart();
+        }
+
+        function getLatestAccountBalances() {
+            const latestTxByAccount = {}; 
+            
+            currentTransactions.forEach(tx => {
+                // Ensure a balance exists and is a valid number before processing
+                if (tx.balance === undefined || tx.balance === null || typeof tx.balance !== 'number') return; 
+
+                const account = tx.account || 'uncategorized';
+                const txDate = parseDate(tx.date).getTime();
+                
+                const existingTx = latestTxByAccount[account];
+
+                if (!existingTx || txDate > existingTx.dateTimestamp) {
+                    latestTxByAccount[account] = {
+                        account: account,
+                        balance: tx.balance,
+                        dateTimestamp: txDate, 
+                        date: tx.date 
+                    };
+                }
+            });
+            
+            return Object.values(latestTxByAccount).map(item => ({
+                account: item.account,
+                currentBalance: item.balance,
+                latestDate: item.date
+            })).sort((a, b) => b.currentBalance - a.currentBalance);
+        }
+
+        function calculateAndDisplayTotalBalance(balances) {
+            const totalBalance = balances.reduce((sum, item) => sum + item.currentBalance, 0);
+
+            document.getElementById('total-account-balance').textContent = formatCurrency(totalBalance);
+            
+            const colorClass = totalBalance >= 0 ? 'text-indigo-700' : 'text-red-700';
+            const balanceEl = document.getElementById('total-account-balance');
+            balanceEl.classList.remove('text-indigo-700', 'text-red-700');
+            balanceEl.classList.add(colorClass);
+        }
+
+        function calculateAndDisplayBalanceChange() {
+            if (currentTransactions.length === 0) {
+                document.getElementById('balance-change-metric').textContent = formatCurrency(0);
+                return;
+            }
+
+            // Get the filter dates (or fallback to min/max if not set)
+            const sortedTxByDate = currentTransactions.slice().sort((a, b) => parseDate(a.date).getTime() - parseDate(b.date).getTime());
+            
+            const startDateStr = filterStartDate || (sortedTxByDate.length > 0 ? sortedTxByDate[0].date : null);
+            const endDateStr = filterEndDate || (sortedTxByDate.length > 0 ? sortedTxByDate[sortedTxByDate.length - 1].date : null);
+            
+            if (!startDateStr || !endDateStr) return; 
+
+            const totalStartBalance = getLatestTotalBalanceAtDate(startDateStr);
+            const totalEndBalance = getLatestTotalBalanceAtDate(endDateStr);
+            
+            const balanceChange = totalEndBalance - totalStartBalance;
+
+            document.getElementById('balance-change-metric').textContent = formatCurrency(balanceChange);
+            
+            const colorClass = balanceChange >= 0 ? 'text-green-700' : 'text-red-700';
+            const changeEl = document.getElementById('balance-change-metric');
+            changeEl.classList.remove('text-green-700', 'text-red-700');
+            changeEl.classList.add(colorClass);
+        }
+
+        function renderAccountBalances(balances) {
+            const listEl = document.getElementById('account-balances-list');
+            listEl.innerHTML = '';
+            
+            if (balances.length === 0) {
+                listEl.innerHTML = '<p class="text-xs text-gray-500">No accounts detected or balance data available.</p>';
+                return;
+            }
+
+            balances.forEach(item => {
+                const isPositive = item.currentBalance >= 0;
+                const colorClass = isPositive ? 'text-green-600' : 'text-red-600';
+                
+                const div = document.createElement('div');
+                div.className = 'flex justify-between text-sm py-1 border-b border-gray-100';
+                div.innerHTML = `
+                    <span class="text-gray-700 font-medium capitalize">${item.account}</span>
+                    <span class="font-semibold ${colorClass}">${formatCurrency(item.currentBalance)}</span>
+                `;
+                listEl.appendChild(div);
+            });
+        }
+        
+        function renderTransactions(transactions) {
+            const listEl = document.getElementById('transaction-list');
+            listEl.innerHTML = '';
+            const emptyState = document.getElementById('empty-state');
+
+            if (transactions.length === 0) {
+                emptyState.classList.remove('hidden');
+                return;
+            } else {
+                emptyState.classList.add('hidden');
+            }
+
+            transactions.sort((a, b) => parseDate(b.date) - parseDate(a.date));
+
+            transactions.forEach(tx => {
+                const isExpense = tx.amount < 0;
+                const amountClass = isExpense ? 'text-red-600' : 'text-green-600';
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50 transition duration-100';
+                row.innerHTML = `
+                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900">${tx.date}</td>
+                    <td class="px-3 py-2 whitespace-normal text-sm text-gray-500">${tx.description}</td>
+                    <td class="px-3 py-2 whitespace-nowrap text-sm font-semibold ${amountClass}">
+                        ${formatCurrency(tx.amount)}
+                    </td>
+                    <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-700">
+                        ${formatCurrency(tx.balance)}
+                    </td>
+                    <td class="px-3 py-2 whitespace-nowrap text-right">
+                        <button data-id="${tx.id}" class="text-red-600 hover:text-red-800 transition delete-btn">
+                            &times;
+                        </button>
+                    </td>
+                `;
+                listEl.appendChild(row);
+            });
+
+            listEl.querySelectorAll('.delete-btn').forEach(button => {
+                button.addEventListener('click', (e) => confirmDelete(e.currentTarget.dataset.id));
+            });
+        }
+        
+        // --- Chart Functions ---
+
+        /**
+         * Generates the data structure for the chart, ensuring a point for every month in the range.
+         */
+        function prepareChartData() {
+            if (currentTransactions.length === 0) return { labels: [], data: [] };
+
+            // 1. Sort transactions by date ascending
+            const sortedTxs = currentTransactions.slice().sort((a, b) => parseDate(a.date) - parseDate(b.date));
+            
+            // Find min and max date objects
+            const minDate = parseDate(sortedTxs[0].date);
+            const maxDate = parseDate(sortedTxs[sortedTxs.length - 1].date);
+
+            // 2. Generate ALL month keys (YYYY-MM) between min and max date
+            const allMonthKeys = getMonthsBetween(minDate, maxDate);
+
+            // 3. Calculate total balance for the last day of each generated month
+            const chartDataValues = [];
+            
+            allMonthKeys.forEach(monthKey => {
+                const [year, month] = monthKey.split('-').map(Number);
+                
+                // Calculate the last day of the current month (e.g., Nov 30, 2023)
+                // Day 0 of the next month gives the last day of the current month.
+                const lastDayOfMonth = new Date(year, month, 0); 
+                const lastDayOfMonthISO = lastDayOfMonth.toISOString().split('T')[0];
+                
+                // Get the latest known total balance as of the end of this month
+                const balance = getLatestTotalBalanceAtDate(lastDayOfMonthISO);
+                chartDataValues.push(balance);
+            });
+
+            return { 
+                labels: allMonthKeys, 
+                data: chartDataValues 
+            };
+        }
+
+        /**
+         * Renders the line chart showing monthly total account balances.
+         */
+        function renderMonthlyBalanceChart() {
+            const chartData = prepareChartData();
+            const canvas = document.getElementById('monthly-balance-chart');
+            const emptyState = document.getElementById('chart-empty-state');
+            
+            if (chartData.labels.length === 0) {
+                if (monthlyBalanceChart) {
+                    monthlyBalanceChart.destroy();
+                    monthlyBalanceChart = null;
+                }
+                emptyState.classList.remove('hidden');
+                return;
+            }
+
+            emptyState.classList.add('hidden');
+
+            // Format the labels for better readability (e.g., "Nov '23" from "2023-11")
+            const formattedLabels = chartData.labels.map(key => {
+                const parts = key.split('-'); // key is YYYY-MM
+                if (parts.length === 2) {
+                    // Note: Month is 1-indexed in the key, but Date constructor uses 0-indexed month
+                    const date = new Date(parts[0], parts[1] - 1, 1);
+                    return date.toLocaleString('en-US', { month: 'short', year: '2-digit' }); 
+                }
+                return key;
+            });
+
+            if (monthlyBalanceChart) {
+                monthlyBalanceChart.data.labels = formattedLabels; 
+                monthlyBalanceChart.data.datasets[0].data = chartData.data;
+                monthlyBalanceChart.update();
+            } else {
+                monthlyBalanceChart = new Chart(canvas, {
+                    type: 'line',
+                    data: {
+                        labels: formattedLabels, 
+                        datasets: [{
+                            label: 'Total Account Value',
+                            data: chartData.data,
+                            borderColor: '#4f46e5', // Indigo-600
+                            backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                            borderWidth: 2,
+                            tension: 0.3,
+                            fill: true,
+                            pointRadius: 4, // Increased point size for visibility
+                            pointBackgroundColor: '#4f46e5',
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        let label = context.dataset.label || '';
+                                        if (label) {
+                                            label += ': ';
+                                        }
+                                        if (context.parsed.y !== null) {
+                                            label += formatCurrency(context.parsed.y);
+                                        }
+                                        return label;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: false,
+                                ticks: {
+                                    callback: function(value) { return formatCurrency(value); }
+                                }
+                            },
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: 'Month'
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+        }
+        
+        // --- Storage Logic ---
+        function loadTransactionsFromLocal() {
+            try {
+                const storedTx = localStorage.getItem(TRANSACTION_KEY);
+                currentTransactions = storedTx ? JSON.parse(storedTx) : [];
+                
+                updateUI();
+            } catch (e) {
+                console.error("Error loading from localStorage:", e);
+                showStatus('Could not load existing data from browser storage.', 'error');
+            }
+        }
+
+        function saveTransactionsToLocal() {
+            try {
+                localStorage.setItem(TRANSACTION_KEY, JSON.stringify(currentTransactions));
+            } catch (e) {
+                console.error("Error saving transactions to localStorage:", e);
+                showStatus('Warning: Failed to save transaction data.', 'error');
+            }
+        }
+        
+        async function clearAllData() {
+            const confirmed = await showModal('Confirm Data Deletion', 'Delete ALL transaction data?', true);
+            if (confirmed) {
+                localStorage.removeItem(TRANSACTION_KEY);
+                currentTransactions = [];
+                document.getElementById('ai-response-content').innerHTML = '<p>Click "Run AI Analysis" above after uploading transactions to get simple, actionable financial advice. **(Requires API key in the code)**</p>';
+                document.getElementById('sources-display').classList.add('hidden');
+                updateUI();
+                showStatus('All stored data deleted.', 'info');
+            }
+        }
+        
+        function createTransactionKey(tx) {
+            const datePart = tx.date;
+            const descPart = tx.description.toLowerCase().replace(/[^a-z0-9]/g, '');
+            const amountPart = Math.round(tx.amount * 10) / 10; 
+            return `${datePart}-${descPart}-${amountPart}`;
+        }
+        
+        async function bulkSaveTransactions(newTransactions) {
+            if (newTransactions.length === 0) {
+                showStatus('No valid transactions found in the file.', 'error');
+                return;
+            }
+
+            showLoading(true, `Merging ${newTransactions.length} transactions...`);
+
+            try {
+                const existingKeys = new Set(currentTransactions.map(createTransactionKey));
+                let mergedCount = 0;
+
+                newTransactions.forEach(tx => {
+                    const key = createTransactionKey(tx);
+                    if (!existingKeys.has(key)) {
+                        currentTransactions.push(tx);
+                        mergedCount++;
+                    }
+                });
+                
+                saveTransactionsToLocal(); 
+                updateUI(); 
+
+                const message = (mergedCount > 0) 
+                    ? `${mergedCount} new transactions added (Total: ${currentTransactions.length}).` 
+                    : `File processed. No new transactions found (all were duplicates).`;
+                showStatus(message, mergedCount > 0 ? 'success' : 'info');
+
+            } catch (e) {
+                console.error("Error merging and saving documents: ", e);
+                showModal('Storage Error', `Failed to merge transactions: ${e.message}`, false);
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function confirmDelete(id) {
+            const confirmed = await showModal('Confirm Deletion', 'Delete this single transaction?', true);
+            if (confirmed) {
+                currentTransactions = currentTransactions.filter(tx => tx.id !== id);
+                saveTransactionsToLocal();
+                updateUI(); 
+                showStatus('Transaction deleted.', 'info');
+            }
+        }
+
+        // --- Parsing Logic (with Debugging) ---
+        function detectDelimiter(lines) {
+            const counts = { ',': 0, '\t': 0, ';': 0 };
+            const header = lines[0];
+            counts[','] = header.split(',').length;
+            counts['\t'] = header.split('\t').length;
+            counts[';'] = header.split(';').length;
+            
+            let bestDelimiter = ',';
+            let maxCount = counts[','];
+            
+            if (counts['\t'] > maxCount && counts['\t'] > 1) { 
+                maxCount = counts['\t'];
+                bestDelimiter = '\t';
+            }
+            if (counts[';'] > maxCount && counts[';'] > 1) {
+                bestDelimiter = ';';
+            }
+            return bestDelimiter;
+        }
+
+        function parseCSV(csvText) {
+            try {
+                const lines = csvText.trim().split('\n').filter(line => line.trim() !== '');
+                if (lines.length < 2) return []; 
+
+                const delimiter = detectDelimiter(lines);
+                console.log("PARSING DEBUG: Detected Delimiter:", delimiter);
+
+                const rawHeaders = lines[0].split(delimiter).map(h => h.trim().replace(/"/g, ''));
+                const dataRows = lines.slice(1);
+                const transactions = [];
+
+                const headerMap = {
+                    'date': ['date', 'posted', 'time', 'dt'],
+                    'account': ['account', 'type', 'source'],
+                    'description': ['description', 'payee', 'memo', 'merchant'],
+                    'amount': ['amount', 'debit', 'credit', 'value', 'withdrawal', 'deposit'],
+                    'balance': ['balance', 'current balance', 'running balance', 'new balance', 'ending balance'], 
+                };
+
+                const colIndices = {};
+                rawHeaders.forEach((header, index) => {
+                    const normalizedHeader = header.toLowerCase().trim();
+                    for (const internalField in headerMap) {
+                        if (headerMap[internalField].some(keyword => normalizedHeader.includes(keyword))) {
+                            if (!colIndices[internalField]) {
+                                colIndices[internalField] = index;
+                                break;
+                            }
+                        }
+                    }
+                });
+                
+                console.log("PARSING DEBUG: Raw Headers:", rawHeaders);
+                console.log("PARSING DEBUG: Parsed Column Map (Internal Field: Column Index):", colIndices);
+
+                if (colIndices.date === undefined || colIndices.description === undefined || colIndices.amount === undefined || colIndices.balance === undefined) {
+                    showModal('Header Error', `Could not find all required columns (Date, Description, Amount, and Balance). Detected headers: ${rawHeaders.join(', ')}. Please ensure your CSV includes a Running Balance column and check console for PARSING DEBUG logs.`, false);
+                    return [];
+                }
+                
+                dataRows.forEach((line) => {
+                    const values = line.split(delimiter).map(v => v.trim().replace(/^"|"$/g, ''));
+                    if (values.length !== rawHeaders.length) return; 
+
+                    const tx = {};
+                    
+                    for (const [internalField, colIndex] of Object.entries(colIndices)) {
+                        const rawValue = (colIndex !== undefined && values[colIndex]) ? String(values[colIndex]) : '';
+
+                        if (internalField === 'amount' || internalField === 'balance') {
+                            let cleanedValue = rawValue.replace(/[,$\s]/g, ''); 
+                            if (cleanedValue.endsWith('-')) cleanedValue = '-' + cleanedValue.slice(0, -1);
+                            tx[internalField] = parseFloat(cleanedValue) || 0;
+                        } else if (internalField === 'account') {
+                            tx[internalField] = rawValue.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+                        } else {
+                            tx[internalField] = rawValue;
+                        }
+                    }
+
+                    if (tx.date && tx.description && typeof tx.amount === 'number' && !isNaN(tx.amount) && typeof tx.balance === 'number' && !isNaN(tx.balance)) {
+                        transactions.push({
+                            id: crypto.randomUUID(), 
+                            date: tx.date,
+                            account: tx.account || 'uncategorized', 
+                            description: tx.description,
+                            amount: tx.amount,
+                            balance: tx.balance, // Include the balance from the CSV
+                            timestamp: Date.now(), 
+                        });
+                    }
+                });
+
+                return transactions;
+
+            } catch (e) {
+                console.error("Critical error during CSV parsing:", e);
+                showModal('Parsing Failure', `An unexpected error occurred while reading the file: ${e.message}. Please check console for PARSING DEBUG logs.`, false);
+                return [];
+            }
+        }
+        
+        async function handleFileUpload(event) {
+            event.preventDefault();
+            const file = document.getElementById('csvFile').files?.[0]; 
+
+            if (!file) {
+                showStatus('Please select a file to upload.', 'error');
+                return;
+            }
+            
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                showLoading(true, "Parsing data...");
+                const transactions = parseCSV(e.target.result);
+                showLoading(false);
+                if (transactions.length > 0) {
+                    await bulkSaveTransactions(transactions);
+                } else if (!document.getElementById('custom-modal').classList.contains('hidden')) {
+                     // Modal already shown by parseCSV
+                } else {
+                     showModal('Parsing Error', 'No valid transactions could be extracted.', false);
+                }
+                document.getElementById('csvFile').value = '';
+            };
+            reader.onerror = () => showModal('File Error', 'Failed to read the file.', false);
+            reader.readAsText(file);
+        }
+
+        // --- Gemini API Integration (Placeholder) ---
+        async function categorizeAndAnalyze() {
+            const transactions = getFilteredTransactions(); 
+
+            if (!transactions || transactions.length === 0) {
+                 showModal('No Data', 'Please ensure you have filtered transactions before running the analysis.', false);
+                 return;
+            }
+
+            const analysisContentEl = document.getElementById('ai-response-content');
+            const sourcesEl = document.getElementById('sources-display');
+            analysisContentEl.innerHTML = '<p class="text-gray-500">Analysis running...</p>';
+            sourcesEl.classList.add('hidden');
+
+            const formattedData = transactions.map(tx =>
+                `Date: ${tx.date}, Account: ${tx.account}, Amount: ${tx.amount.toFixed(2)}, Description: "${tx.description}", Balance: ${tx.balance.toFixed(2) || 'N/A'}`
+            ).join('\n');
+
+            const systemPrompt = `You are a friendly financial coach. Analyze the provided user transaction data. 1. Categorize the spending into 3-5 major groups. 2. Give 3 simple, actionable cost-cutting tips. 3. Suggest 3 basic, diversified investment ideas. Keep the entire response concise and use clear headings. Use Google Search grounding to ensure investment advice is current.`;
+            const userQuery = `Analyze the following transaction data (Filtered Range: ${filterStartDate || 'All'} to ${filterEndDate || 'All'}):\n${formattedData}`;
+            
+            const apiKey = ""; // If you want to use models other than gemini-2.5-flash-preview-09-2025 or imagen-4.0-generate-001, provide an API key here. Otherwise, leave this as-is.
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                tools: [{ "google_search": {} }],
+                systemInstruction: { parts: [{ text: systemPrompt }] },
+            };
+
+            showLoading(true, "Analyzing transactions...");
+            
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) throw new Error(`API call failed with status: ${response.status}`);
+                
+                const result = await response.json();
+                const candidate = result.candidates?.[0];
+                const text = candidate?.content?.parts?.[0]?.text || "No response received from the AI advisor.";
+
+                analysisContentEl.innerHTML = text;
+
+                const sources = candidate?.groundingMetadata?.groundingAttributions?.map(attr => 
+                    ({ uri: attr.web?.uri, title: attr.web?.title })
+                ).filter(s => s.uri) || [];
+
+                const sourceListEl = document.getElementById('source-list');
+                sourceListEl.innerHTML = '';
+                
+                if (sources.length > 0) {
+                    sourcesEl.classList.remove('hidden');
+                    const uniqueUris = new Set();
+                    sources.forEach(source => {
+                        if (!uniqueUris.has(source.uri)) {
+                            uniqueUris.add(source.uri);
+                            const li = document.createElement('li');
+                            li.innerHTML = `<a href="${source.uri}" target="_blank" class="text-indigo-600 hover:underline">${source.title || 'Source'}</a>`;
+                            sourceListEl.appendChild(li);
+                        }
+                    });
+                } else {
+                    sourcesEl.classList.add('hidden');
+                }
+
+                showStatus('Financial analysis complete!', 'success');
+            } catch (error) {
+                console.error("Gemini API Error:", error);
+                showModal('AI Analysis Error', `Failed to get analysis: ${error.message}`, false);
+                analysisContentEl.innerHTML = '<p class="text-red-500">Failed to get analysis. Please check console.</p>';
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // --- Initialization ---
+        document.addEventListener('DOMContentLoaded', () => {
+            loadTransactionsFromLocal(); 
+            
+            document.getElementById('csv-upload-form').addEventListener('submit', handleFileUpload);
+            document.getElementById('run-ai-analysis-btn').addEventListener('click', categorizeAndAnalyze);
+            document.getElementById('delete-all-btn').addEventListener('click', clearAllData);
+        });
+
+    </script>
+</body>
+</html>
